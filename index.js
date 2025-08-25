@@ -113,18 +113,6 @@ const authenticateWebhook = (req, res, next) => {
 };
 
 
-/**
- * The final, universal synchronization function with enhanced logging. It uses a
- * robust "read-modify-replace" strategy and provides detailed console output
- * for easier debugging.
- *
- * @param {Db} db - The MongoDB database connection object.
- * @param {number} orderId - The ID of the order to synchronize.
- * @param {object} newOrderData - An object representing the desired state changes.
- * @param {string} source - A description of what triggered the update.
- * @param {object} [options={}] - Optional. Can contain { set: {...}, push: {...} } for extra operations.
- * @returns {Promise<object>} - A promise that resolves to an object detailing what was updated.
- */
 const syncOrderStatus = async (db, orderId, newOrderData, source, options = {}) => {
     const logPrefix = "[SyncOrderStatus_Final_Verbose]";
     try {
@@ -139,31 +127,74 @@ const syncOrderStatus = async (db, orderId, newOrderData, source, options = {}) 
         const existingOrder = await collection.findOne(filter);
         console.log(`${logPrefix} ...Order found: ${!!existingOrder}`);
 
-        if (!existingOrder) {
-            // --- CREATION LOGIC ---
-            console.log(`${logPrefix} [ACTION] Order not found. Entering CREATE logic.`);
-            const docToInsert = { ...newOrderData };
-            const initialHistoryEntry = (status) => ({
-                old_status: null, new_status: status, timestamp: currentTime, source: `created-by-${source}`
-            });
+        // if (!existingOrder) {
+        //     // --- CREATION LOGIC ---
+        //     console.log(`${logPrefix} [ACTION] Order not found. Entering CREATE logic.`);
+        //     const docToInsert = { ...newOrderData };
+        //     const initialHistoryEntry = (status) => ({
+        //         old_status: null, new_status: status, timestamp: currentTime, source: `created-by-${source}`
+        //     });
 
-            console.log(`${logPrefix} Adding initial history for main order status: '${docToInsert.order_status}'`);
-            docToInsert.status_history = [initialHistoryEntry(docToInsert.order_status)];
+        //     console.log(`${logPrefix} Adding initial history for main order status: '${docToInsert.order_status}'`);
+        //     docToInsert.status_history = [initialHistoryEntry(docToInsert.order_status)];
             
-            const itemKey = docToInsert.order_items ? 'order_items' : 'suborders';
-            if (docToInsert[itemKey]) {
-                console.log(`${logPrefix} Adding initial history for ${docToInsert[itemKey].length} sub-order(s).`);
-                docToInsert[itemKey].forEach(item => {
-                    item.item_status = item.item_status || docToInsert.order_status;
-                    item.status_history = [initialHistoryEntry(item.item_status)];
-                });
-            }
+        //     const itemKey = docToInsert.order_items ? 'order_items' : 'suborders';
+        //     if (docToInsert[itemKey]) {
+        //         console.log(`${logPrefix} Adding initial history for ${docToInsert[itemKey].length} sub-order(s).`);
+        //         docToInsert[itemKey].forEach(item => {
+        //             item.item_status = item.item_status || docToInsert.order_status;
+        //             item.status_history = [initialHistoryEntry(item.item_status)];
+        //         });
+        //     }
             
-            console.log(`${logPrefix} Document ready for insertion.`);
-            await collection.insertOne(docToInsert);
-            console.log(`${logPrefix} ✅ Successfully created new order.`);
-            return { success: true, action: 'inserted', changes: ['new_order_with_history'] };
+        //     console.log(`${logPrefix} Document ready for insertion.`);
+        //     await collection.insertOne(docToInsert);
+        //     console.log(`${logPrefix} ✅ Successfully created new order.`);
+        //     return { success: true, action: 'inserted', changes: ['new_order_with_history'] };
+        // }
+
+        if (!existingOrder) {
+    // --- CREATION LOGIC ---
+    console.log(`${logPrefix} [ACTION] Order not found. Entering CREATE logic.`);
+    const docToInsert = { ...newOrderData };
+
+    // 🔹 Client attach logic (new)
+    if (newOrderData.packer) {
+        const clientCollection = db.collection('client');
+        const clientData = await clientCollection.findOne({ email: newOrderData.packer });
+
+        if (clientData) {
+            docToInsert.client_id = clientData._id;
+            docToInsert.client_email = clientData.email;
+            docToInsert.client_company_name = clientData.company_name;
+            console.log(`${logPrefix} ✅ Matched client by packer email: ${clientData.email}`);
+        } else {
+            console.log(`${logPrefix} ⚠️ No client found for packer email: ${newOrderData.packer}`);
         }
+    }
+
+    const initialHistoryEntry = (status) => ({
+        old_status: null, new_status: status, timestamp: currentTime, source: `created-by-${source}`
+    });
+
+    console.log(`${logPrefix} Adding initial history for main order status: '${docToInsert.order_status}'`);
+    docToInsert.status_history = [initialHistoryEntry(docToInsert.order_status)];
+    
+    const itemKey = docToInsert.order_items ? 'order_items' : 'suborders';
+    if (docToInsert[itemKey]) {
+        console.log(`${logPrefix} Adding initial history for ${docToInsert[itemKey].length} sub-order(s).`);
+        docToInsert[itemKey].forEach(item => {
+            item.item_status = item.item_status || docToInsert.order_status;
+            item.status_history = [initialHistoryEntry(item.item_status)];
+        });
+    }
+    
+    console.log(`${logPrefix} Document ready for insertion.`);
+    await collection.insertOne(docToInsert);
+    console.log(`${logPrefix} ✅ Successfully created new order.`);
+    return { success: true, action: 'inserted', changes: ['new_order_with_history'] };
+}
+
 
         // --- UPDATE LOGIC ---
         console.log(`${logPrefix} [ACTION] Order found. Entering UPDATE logic.`);
@@ -238,59 +269,6 @@ const syncOrderStatus = async (db, orderId, newOrderData, source, options = {}) 
     }
 };
 
-
-// app.post('/webhook/create-order', authenticateWebhook, async (req, res) => {
-//     try {
-//         console.log("\nReceived authenticated request at /webhook/create-order");
-
-//         // --- INTELLIGENT PAYLOAD DETECTION ---
-//         let ordersToProcess;
-//         if (Array.isArray(req.body)) {
-//             // This is a V2 payload (raw array)
-//             console.log("-> Detected V2 payload format (JSON array).");
-//             ordersToProcess = req.body;
-//         } else if (req.body && Array.isArray(req.body.orders)) {
-//             // This is a V1 payload (object with an 'orders' key)
-//             console.log("-> Detected V1 payload format (Object with 'orders' key).");
-//             ordersToProcess = req.body.orders;
-//         } else {
-//             // The payload is in an unknown or invalid format
-//             console.log("❌ Validation failed: Payload is not a valid V1 or V2 format.");
-//             return res.status(400).json({ message: "Bad Request: Invalid or unrecognized payload structure." });
-//         }
-//         // --- END OF DETECTION ---
-
-//         // Validate that the resulting array is not empty
-//         if (ordersToProcess.length === 0) {
-//             console.log("❌ Validation failed: The 'orders' array is empty.");
-//             return res.status(400).json({ message: "Bad Request: Empty 'orders' array." });
-//         }
-
-//         console.log(`➡️  Received ${ordersToProcess.length} order(s) to process.`);
-
-//         // Get a reference to your MongoDB collection
-//         const collection = db.collection('easyecom_orders');
-
-//         // Insert the new orders into the collection
-//         const result = await collection.insertMany(ordersToProcess);
-//         console.log(`✅  Successfully inserted ${result.insertedCount} new order(s) into MongoDB.`);
-
-//         // Send a success response
-//         res.status(201).json({ 
-//             message: 'Webhook received successfully. Orders created.', 
-//             insertedCount: result.insertedCount 
-//         });
-
-//     } catch (error) {
-//         console.error("❌ ERROR processing /webhook/create-order:", error.message);
-//         res.status(500).json({ 
-//             message: 'Failed to process webhook.', 
-//             error: error.message 
-//         });
-//     }
-// });
-
-
 /**
  * Webhook to create a new order.
  * It uses the smart syncOrderStatus function to ensure that a status
@@ -357,78 +335,6 @@ app.post('/webhook/create-order', authenticateWebhook, async (req, res) => {
         });
     }
 });
-
-
-/**
- * Webhook endpoint to confirm an existing order.
- * Handles both V1 ({ "orders": [...] }) and V2 ([...]) payload structures.
- */
-// app.post('/webhook/confirm-order', authenticateWebhook, async (req, res) => {
-//     try {
-//         console.log("\nReceived authenticated request at /webhook/confirm-order");
-
-//         // --- INTELLIGENT PAYLOAD DETECTION ---
-//         let ordersToProcess;
-//         if (Array.isArray(req.body)) {
-//             // This is a V2 payload (raw array)
-//             console.log("-> Detected V2 payload format (JSON array).");
-//             ordersToProcess = req.body;
-//         } else if (req.body && Array.isArray(req.body.orders)) {
-//             // This is a V1 payload (object with an 'orders' key)
-//             console.log("-> Detected V1 payload format (Object with 'orders' key).");
-//             ordersToProcess = req.body.orders;
-//         } else {
-//             // The payload is in an unknown or invalid format
-//             console.log("❌ Validation failed: Payload is not a valid V1 or V2 format.");
-//             return res.status(400).json({ message: "Bad Request: Invalid or unrecognized payload structure." });
-//         }
-//         // --- END OF DETECTION ---
-
-//         if (ordersToProcess.length === 0) {
-//             console.log("❌ Validation failed: 'orders' array is empty.");
-//             return res.status(400).json({ message: "Bad Request: Empty 'orders' array." });
-//         }
-
-//         console.log(`➡️  Received ${ordersToProcess.length} confirmed order(s) to process.`);
-//         const collection = db.collection('easyecom_orders');
-//         let updateCount = 0;
-
-//         for (const order of ordersToProcess) {
-//             const { order_id } = order;
-
-//             if (!order_id) {
-//                 console.log("⚠️  Skipping order due to missing 'order_id'.");
-//                 continue;
-//             }
-            
-//             // The update logic remains the same, as '$set' will handle
-//             // adding new fields and updating existing ones.
-//             const result = await collection.updateOne(
-//                 { order_id: order_id },
-//                 { $set: order }
-//             );
-
-//             if (result.matchedCount > 0) {
-//                 updateCount++;
-//                 console.log(`   - Successfully updated order_id: ${order_id}`);
-//             } else {
-//                 console.log(`   - Warning: No matching order found for order_id: ${order_id}. Nothing updated.`);
-//             }
-//         }
-
-//         console.log(`✅  Process complete. Successfully updated ${updateCount} of ${ordersToProcess.length} order(s).`);
-
-//         res.status(200).json({ 
-//             message: 'Webhook processed successfully. Orders updated.', 
-//             updatedCount: updateCount,
-//             receivedCount: ordersToProcess.length
-//         });
-
-//     } catch (error) {
-//         console.error("❌ ERROR processing /webhook/confirm-order:", error.message);
-//         res.status(500).json({ message: 'Failed to process webhook.', error: error.message });
-//     }
-// });
 
 
 /**
@@ -499,75 +405,6 @@ app.post('/webhook/confirm-order', authenticateWebhook, async (req, res) => {
 });
 
 
-
-// app.post('/webhook/ready-to-dispatch', authenticateWebhook, async (req, res) => {
-//     try {
-//         console.log("\nReceived authenticated request at /webhook/confirm-order");
-
-//         // --- INTELLIGENT PAYLOAD DETECTION ---
-//         let ordersToProcess;
-//         if (Array.isArray(req.body)) {
-//             // This is a V2 payload (raw array)
-//             console.log("-> Detected V2 payload format (JSON array).");
-//             ordersToProcess = req.body;
-//         } else if (req.body && Array.isArray(req.body.orders)) {
-//             // This is a V1 payload (object with an 'orders' key)
-//             console.log("-> Detected V1 payload format (Object with 'orders' key).");
-//             ordersToProcess = req.body.orders;
-//         } else {
-//             // The payload is in an unknown or invalid format
-//             console.log("❌ Validation failed: Payload is not a valid V1 or V2 format.");
-//             return res.status(400).json({ message: "Bad Request: Invalid or unrecognized payload structure." });
-//         }
-//         // --- END OF DETECTION ---
-
-//         if (ordersToProcess.length === 0) {
-//             console.log("❌ Validation failed: 'orders' array is empty.");
-//             return res.status(400).json({ message: "Bad Request: Empty 'orders' array." });
-//         }
-
-//         console.log(`➡️  Received ${ordersToProcess.length} confirmed order(s) to process.`);
-//         const collection = db.collection('easyecom_orders');
-//         let updateCount = 0;
-
-//         for (const order of ordersToProcess) {
-//             const { order_id } = order;
-
-//             if (!order_id) {
-//                 console.log("⚠️  Skipping order due to missing 'order_id'.");
-//                 continue;
-//             }
-            
-//             // The update logic remains the same, as '$set' will handle
-//             // adding new fields and updating existing ones.
-//             const result = await collection.updateOne(
-//                 { order_id: order_id },
-//                 { $set: order }
-//             );
-
-//             if (result.matchedCount > 0) {
-//                 updateCount++;
-//                 console.log(`   - Successfully updated order_id: ${order_id}`);
-//             } else {
-//                 console.log(`   - Warning: No matching order found for order_id: ${order_id}. Nothing updated.`);
-//             }
-//         }
-
-//         console.log(`✅  Process complete. Successfully updated ${updateCount} of ${ordersToProcess.length} order(s).`);
-
-//         res.status(200).json({ 
-//             message: 'Webhook processed successfully. Orders updated.', 
-//             updatedCount: updateCount,
-//             receivedCount: ordersToProcess.length
-//         });
-
-//     } catch (error) {
-//         console.error("❌ ERROR processing /webhook/confirm-order:", error.message);
-//         res.status(500).json({ message: 'Failed to process webhook.', error: error.message });
-//     }
-// });
-
-
 /**
  * Webhook for when an order is ready to be dispatched.
  * This route uses the central syncOrderStatus function to automatically find
@@ -635,74 +472,6 @@ app.post('/webhook/ready-to-dispatch', authenticateWebhook, async (req, res) => 
     }
 });
 
-
-
-// app.post('/webhook/manifested', authenticateWebhook, async (req, res) => {
-//     try {
-//         console.log("\nReceived authenticated request at /webhook/confirm-order");
-
-//         // --- INTELLIGENT PAYLOAD DETECTION ---
-//         let ordersToProcess;
-//         if (Array.isArray(req.body)) {
-//             // This is a V2 payload (raw array)
-//             console.log("-> Detected V2 payload format (JSON array).");
-//             ordersToProcess = req.body;
-//         } else if (req.body && Array.isArray(req.body.orders)) {
-//             // This is a V1 payload (object with an 'orders' key)
-//             console.log("-> Detected V1 payload format (Object with 'orders' key).");
-//             ordersToProcess = req.body.orders;
-//         } else {
-//             // The payload is in an unknown or invalid format
-//             console.log("❌ Validation failed: Payload is not a valid V1 or V2 format.");
-//             return res.status(400).json({ message: "Bad Request: Invalid or unrecognized payload structure." });
-//         }
-//         // --- END OF DETECTION ---
-
-//         if (ordersToProcess.length === 0) {
-//             console.log("❌ Validation failed: 'orders' array is empty.");
-//             return res.status(400).json({ message: "Bad Request: Empty 'orders' array." });
-//         }
-
-//         console.log(`➡️  Received ${ordersToProcess.length} confirmed order(s) to process.`);
-//         const collection = db.collection('easyecom_orders');
-//         let updateCount = 0;
-
-//         for (const order of ordersToProcess) {
-//             const { order_id } = order;
-
-//             if (!order_id) {
-//                 console.log("⚠️  Skipping order due to missing 'order_id'.");
-//                 continue;
-//             }
-            
-//             // The update logic remains the same, as '$set' will handle
-//             // adding new fields and updating existing ones.
-//             const result = await collection.updateOne(
-//                 { order_id: order_id },
-//                 { $set: order }
-//             );
-
-//             if (result.matchedCount > 0) {
-//                 updateCount++;
-//                 console.log(`   - Successfully updated order_id: ${order_id}`);
-//             } else {
-//                 console.log(`   - Warning: No matching order found for order_id: ${order_id}. Nothing updated.`);
-//             }
-//         }
-
-//         console.log(`✅  Process complete. Successfully updated ${updateCount} of ${ordersToProcess.length} order(s).`);
-
-//         res.status(200).json({ 
-//             message: 'Webhook processed successfully. Orders updated.', 
-//             updatedCount: updateCount,
-//             receivedCount: ordersToProcess.length
-//         });
-
-//     } catch (error) {
-//         console.error("❌ ERROR processing /webhook/confirm-order:", error.message);
-//         res.status(500).json({ message: 'Failed to process webhook.', error: error.message });
-//     }
-// });
 
 /**
  * Webhook for when an order has been manifested.
@@ -772,72 +541,6 @@ app.post('/webhook/manifested', authenticateWebhook, async (req, res) => {
 });
 
 
-// app.post('/webhook/cancel-order', authenticateWebhook, async (req, res) => {
-//     try {
-//         console.log("\nReceived authenticated request at /webhook/confirm-order");
-
-//         // --- INTELLIGENT PAYLOAD DETECTION ---
-//         let ordersToProcess;
-//         if (Array.isArray(req.body)) {
-//             // This is a V2 payload (raw array)
-//             console.log("-> Detected V2 payload format (JSON array).");
-//             ordersToProcess = req.body;
-//         } else if (req.body && Array.isArray(req.body.orders)) {
-//             // This is a V1 payload (object with an 'orders' key)
-//             console.log("-> Detected V1 payload format (Object with 'orders' key).");
-//             ordersToProcess = req.body.orders;
-//         } else {
-//             // The payload is in an unknown or invalid format
-//             console.log("❌ Validation failed: Payload is not a valid V1 or V2 format.");
-//             return res.status(400).json({ message: "Bad Request: Invalid or unrecognized payload structure." });
-//         }
-//         // --- END OF DETECTION ---
-
-//         if (ordersToProcess.length === 0) {
-//             console.log("❌ Validation failed: 'orders' array is empty.");
-//             return res.status(400).json({ message: "Bad Request: Empty 'orders' array." });
-//         }
-
-//         console.log(`➡️  Received ${ordersToProcess.length} confirmed order(s) to process.`);
-//         const collection = db.collection('easyecom_orders');
-//         let updateCount = 0;
-
-//         for (const order of ordersToProcess) {
-//             const { order_id } = order;
-
-//             if (!order_id) {
-//                 console.log("⚠️  Skipping order due to missing 'order_id'.");
-//                 continue;
-//             }
-            
-//             // The update logic remains the same, as '$set' will handle
-//             // adding new fields and updating existing ones.
-//             const result = await collection.updateOne(
-//                 { order_id: order_id },
-//                 { $set: order }
-//             );
-
-//             if (result.matchedCount > 0) {
-//                 updateCount++;
-//                 console.log(`   - Successfully updated order_id: ${order_id}`);
-//             } else {
-//                 console.log(`   - Warning: No matching order found for order_id: ${order_id}. Nothing updated.`);
-//             }
-//         }
-
-//         console.log(`✅  Process complete. Successfully updated ${updateCount} of ${ordersToProcess.length} order(s).`);
-
-//         res.status(200).json({ 
-//             message: 'Webhook processed successfully. Orders updated.', 
-//             updatedCount: updateCount,
-//             receivedCount: ordersToProcess.length
-//         });
-
-//     } catch (error) {
-//         console.error("❌ ERROR processing /webhook/confirm-order:", error.message);
-//         res.status(500).json({ message: 'Failed to process webhook.', error: error.message });
-//     }
-// });
 
 
 /**
@@ -907,82 +610,6 @@ app.post('/webhook/cancel-order', authenticateWebhook, async (req, res) => {
     }
 });
 
-
-
-/**
- * Webhook endpoint to process order returns.
- * Handles multiple payload structures, including V1 (object) and V2 (nested array).
- * Listens for POST requests at /webhook/mark-return
- */
-// app.post('/webhook/mark-return', authenticateWebhook, async (req, res) => {
-//     try {
-//         console.log("\nReceived authenticated request at /webhook/mark-return");
-
-//         // --- INTELLIGENT PAYLOAD DETECTION for V1 and V2 ---
-//         let creditNotesToProcess;
-//         if (Array.isArray(req.body) && req.body.length > 0 && Array.isArray(req.body[0])) {
-//             // This is a V2 payload: a nested array `[ [ ... ] ]`
-//             console.log("-> Detected V2 payload format (nested array).");
-//             creditNotesToProcess = req.body[0]; // The actual data is in the first element
-//         } else if (req.body && Array.isArray(req.body.credit_notes)) {
-//             // This is a V1 payload: an object with a 'credit_notes' key `{ "credit_notes": [...] }`
-//             console.log("-> Detected V1 payload format (Object with 'credit_notes' key).");
-//             creditNotesToProcess = req.body.credit_notes;
-//         } else {
-//             // The payload is in an unknown or invalid format
-//             console.log("❌ Validation failed: Payload is not a valid V1 or V2 return format.");
-//             return res.status(400).json({ message: "Bad Request: Invalid or unrecognized payload structure." });
-//         }
-//         // --- END OF DETECTION ---
-
-//         if (!creditNotesToProcess || creditNotesToProcess.length === 0) {
-//             console.log("❌ Validation failed: The 'credit_notes' array is empty after processing.");
-//             return res.status(400).json({ message: "Bad Request: Empty 'credit_notes' array." });
-//         }
-
-//         console.log(`➡️  Received ${creditNotesToProcess.length} return(s) to process.`);
-//         const collection = db.collection('easyecom_orders');
-//         let updatedCount = 0;
-
-//         for (const creditNote of creditNotesToProcess) {
-//             const { order_id } = creditNote;
-
-//             if (!order_id) {
-//                 console.log("⚠️  Skipping credit note due to missing 'order_id'.");
-//                 continue;
-//             }
-            
-//             const result = await collection.updateOne(
-//                 { order_id: order_id },
-//                 { 
-//                     $push: { returns: creditNote },
-//                     $set: { order_status: "Returned" }
-//                 }
-//             );
-
-//             if (result.matchedCount > 0) {
-//                 updatedCount++;
-//                 console.log(`   - Successfully added return info to order_id: ${order_id}`);
-//             } else {
-//                 console.log(`   - Warning: No matching order found for order_id: ${order_id}.`);
-//             }
-//         }
-
-//         console.log(`✅  Process complete. Successfully updated ${updatedCount} order(s) with return information.`);
-
-//         res.status(200).json({ 
-//             message: 'Return webhook processed successfully.', 
-//             processedReturns: updatedCount 
-//         });
-
-//     } catch (error) {
-//         console.error("❌ ERROR processing /webhook/mark-return:", error.message);
-//         res.status(500).json({ 
-//             message: 'Failed to process return webhook.', 
-//             error: error.message 
-//         });
-//     }
-// });
 
 /**
  * Webhook for when an item is marked for return.
@@ -1126,80 +753,6 @@ app.post('/webhook/update-inventory', authenticateWebhook, async (req, res) => {
 
 
 /**
- * Webhook endpoint for order tracking updates. (Corrected Version)
- * It searches for the specific suborder and embeds the tracking data, ensuring data types match.
- * Listens for POST requests at /webhook/order-tracking
- */
-// app.post('/webhook/order-tracking', authenticateWebhook, async (req, res) => {
-//     try {
-//         console.log("\nReceived authenticated request at /webhook/order-tracking");
-
-//         const trackingUpdates = req.body;
-
-//         if (!Array.isArray(trackingUpdates) || trackingUpdates.length === 0) {
-//             console.log("❌ Validation failed: Payload is not a valid array or is empty.");
-//             return res.status(400).json({ message: "Bad Request: Invalid or empty payload." });
-//         }
-
-//         console.log(`➡️  Received ${trackingUpdates.length} tracking update(s) to process.`);
-
-//         const collection = db.collection('easyecom_orders');
-//         let processedCount = 0;
-
-//         for (const update of trackingUpdates) {
-//             // --- DATA TYPE CORRECTION ---
-//             // Explicitly parse the incoming IDs to ensure they are Numbers, matching the database.
-//             const numericOrderId = parseInt(update.orderId, 10);
-//             const numericSubOrderId = parseInt(update.suborder_id, 10);
-            
-//             // Validate that parsing was successful and we have valid numbers.
-//             if (isNaN(numericOrderId) || isNaN(numericSubOrderId)) {
-//                 console.log(`⚠️  Skipping update due to invalid 'orderId' (${update.orderId}) or 'suborder_id' (${update.suborder_id}).`);
-//                 continue;
-//             }
-//             // --- END OF CORRECTION ---
-
-//             // The rest of the logic uses the corrected numeric IDs.
-//             const result = await collection.updateOne(
-//                 { 
-//                     order_id: numericOrderId, // Use the parsed Number
-//                     "suborders.suborder_id": numericSubOrderId // Use the parsed Number
-//                 },
-//                 { 
-//                     $set: { 
-//                         "suborders.$[elem].tracking_data": update // Embed the full tracking object
-//                     } 
-//                 },
-//                 { 
-//                     arrayFilters: [ { "elem.suborder_id": numericSubOrderId } ] // Filter using the parsed Number
-//                 }
-//             );
-
-//             if (result.matchedCount > 0) {
-//                 processedCount++;
-//                 console.log(`   - Successfully updated tracking for order_id: ${numericOrderId}, suborder_id: ${numericSubOrderId}`);
-//             } else {
-//                 console.log(`   - Warning: No matching order/suborder found for order_id: ${numericOrderId}, suborder_id: ${numericSubOrderId}.`);
-//             }
-//         }
-
-//         console.log(`✅  Process complete. Successfully processed ${processedCount} tracking update(s).`);
-
-//         res.status(200).json({ 
-//             message: 'Order tracking webhook processed successfully.', 
-//             processedUpdates: processedCount 
-//         });
-
-//     } catch (error) {
-//         console.error("❌ ERROR processing /webhook/order-tracking:", error.message);
-//         res.status(500).json({ 
-//             message: 'Failed to process order tracking webhook.', 
-//             error: error.message 
-//         });
-//     }
-// });
-
-/**
  * Webhook for real-time order tracking updates from a carrier.
  * This uses the universal syncOrderStatus function to update the specific sub-order's
  * status, log its history, and embed the latest tracking data—all in one call.
@@ -1269,57 +822,6 @@ app.post('/webhook/order-tracking', authenticateWebhook, async (req, res) => {
     }
 });
 
-
-// app.post('/webhook/fetch-orders', authenticateWebhook, async (req, res) => {
-//     try {
-//         console.log("\nReceived authenticated request at /webhook/create-order");
-
-//         // --- INTELLIGENT PAYLOAD DETECTION ---
-//         let ordersToProcess;
-//         if (Array.isArray(req.body)) {
-//             // This is a V2 payload (raw array)
-//             console.log("-> Detected V2 payload format (JSON array).");
-//             ordersToProcess = req.body;
-//         } else if (req.body && Array.isArray(req.body.orders)) {
-//             // This is a V1 payload (object with an 'orders' key)
-//             console.log("-> Detected V1 payload format (Object with 'orders' key).");
-//             ordersToProcess = req.body.orders;
-//         } else {
-//             // The payload is in an unknown or invalid format
-//             console.log("❌ Validation failed: Payload is not a valid V1 or V2 format.");
-//             return res.status(400).json({ message: "Bad Request: Invalid or unrecognized payload structure." });
-//         }
-//         // --- END OF DETECTION ---
-
-//         // Validate that the resulting array is not empty
-//         if (ordersToProcess.length === 0) {
-//             console.log("❌ Validation failed: The 'orders' array is empty.");
-//             return res.status(400).json({ message: "Bad Request: Empty 'orders' array." });
-//         }
-
-//         console.log(`➡️  Received ${ordersToProcess.length} order(s) to process.`);
-
-//         // Get a reference to your MongoDB collection
-//         const collection = db.collection('easyecom_orders');
-
-//         // Insert the new orders into the collection
-//         const result = await collection.insertMany(ordersToProcess);
-//         console.log(`✅  Successfully inserted ${result.insertedCount} new order(s) into MongoDB.`);
-
-//         // Send a success response
-//         res.status(201).json({ 
-//             message: 'Webhook received successfully. Orders created.', 
-//             insertedCount: result.insertedCount 
-//         });
-
-//     } catch (error) {
-//         console.error("❌ ERROR processing /webhook/create-order:", error.message);
-//         res.status(500).json({ 
-//             message: 'Failed to process webhook.', 
-//             error: error.message 
-//         });
-//     }
-// });
 
 
 /**
