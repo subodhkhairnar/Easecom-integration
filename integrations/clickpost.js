@@ -220,6 +220,9 @@ router.get('/orders', async (req, res) => {
 router.post('/status/update', async (req, res) => {
   console.log("\n\n--- Received request for /integrations/clickpost/status/update ---");
   try {
+    // Enhanced token validation
+    validateToken(req);
+    
     const { waybill, status_code, status_description, location, remarks } = req.body;
 
     // Enhanced validation
@@ -561,6 +564,7 @@ BASE URL: https://your-domain.com/integrations/clickpost
    📥 STATUS UPDATE WEBHOOK:
    POST https://your-domain.com/integrations/clickpost/status/update
    Headers:
+     - x-api-key: your_clickpost_webhook_token
      - Content-Type: application/json
 
 2. API ENDPOINTS (For your system to interact with ClickPost):
