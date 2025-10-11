@@ -1,4 +1,4 @@
-// integrations/clickpost.js
+// integrations/clickpost-dev.js
 const express = require('express');
 const axios = require('axios');
 
@@ -44,9 +44,9 @@ const validateToken = (req, res) => {
   return true;
 };
 
-// Webhook handler for incoming orders - Production Ready
-router.post('/webhook/orders', async (req, res) => {
-  console.log("\n\n--- Received request for /integrations/clickpost/webhook/orders ---");
+// Webhook handler for incoming orders - Development Instance
+router.post('/dev/webhook/orders', async (req, res) => {
+  console.log("\n\n--- Received request for /integrations/clickpost-dev/dev/webhook/orders ---");
   try {
     // Enhanced token validation
     const tokenValidation = validateToken(req, res);
@@ -92,7 +92,7 @@ router.post('/webhook/orders', async (req, res) => {
     }
 
     // Check for duplicate order_id
-    const collection = db.collection('clickpost_orders');
+    const collection = db.collection('clickpost_dev_orders');
     const existingOrder = await collection.findOne({ order_id: orderData.order_id });
     
     if (existingOrder) {
@@ -116,7 +116,7 @@ router.post('/webhook/orders', async (req, res) => {
         status: 'Pending', 
         timestamp: new Date(),
         source: 'webhook',
-        description: 'Order received via webhook'
+        description: 'Order received via webhook (DEV INSTANCE)'
       }],
       pickup_info: {
         name: orderData.pickup_info.name.trim(),
@@ -144,6 +144,7 @@ router.post('/webhook/orders', async (req, res) => {
       created_at: new Date(),
       updated_at: new Date(),
       source: 'webhook',
+      instance: 'dev',
       webhook_metadata: {
         received_at: new Date(),
         ip_address: req.ip || req.connection.remoteAddress,
@@ -161,38 +162,40 @@ router.post('/webhook/orders', async (req, res) => {
     // Enhanced response
     res.status(200).json({
       success: true,
-      message: 'Order created successfully',
+      message: 'Order created successfully (DEV INSTANCE)',
       data: {
         order_id: orderData.order_id,
         waybill: waybill,
         status: 'Pending',
-        created_at: orderToSave.created_at
+        created_at: orderToSave.created_at,
+        instance: 'dev'
       },
-      label_url: `https://your-label-service.com/labels/${waybill}.pdf`, // Replace with real label service
-      tracking_url: `https://your-tracking-service.com/track/${waybill}` // Add tracking URL
+      label_url: `https://your-label-service-dev.com/labels/${waybill}.pdf`, // Replace with real label service
+      tracking_url: `https://your-tracking-service-dev.com/track/${waybill}` // Add tracking URL
     });
 
-    console.log(`✅ Order ${orderData.order_id} received, AWB: ${waybill}, DB ID: ${insertResult.insertedId}`);
+    console.log(`✅ [DEV] Order ${orderData.order_id} received, AWB: ${waybill}, DB ID: ${insertResult.insertedId}`);
   } catch (error) {
-    console.error("❌ Webhook error:", error.message);
+    console.error("❌ [DEV] Webhook error:", error.message);
     
     // Enhanced error response
     res.status(500).json({ 
       success: false, 
       error: error.message,
       timestamp: new Date().toISOString(),
-      request_id: req.headers['x-request-id'] || 'unknown'
+      request_id: req.headers['x-request-id'] || 'unknown',
+      instance: 'dev'
     });
   }
 });
 
 // This route was removed - duplicate of the better implementation below
 
-// Get orders for dashboard
-router.get('/orders', async (req, res) => {
-  console.log("\n\n--- Received request for /integrations/clickpost/orders ---");
+// Get orders for dashboard - Development Instance
+router.get('/dev/orders', async (req, res) => {
+  console.log("\n\n--- Received request for /integrations/clickpost-dev/dev/orders ---");
   try {
-    const collection = db.collection('clickpost_orders');
+    const collection = db.collection('clickpost_dev_orders');
     
     // Add pagination support
     const page = parseInt(req.query.page) || 1;
@@ -225,19 +228,20 @@ router.get('/orders', async (req, res) => {
         total_pages: Math.ceil(totalCount / limit),
         total_orders: totalCount,
         orders_per_page: limit
-      }
+      },
+      instance: 'dev'
     });
-    console.log(`✅ Retrieved ${orders.length} orders from MongoDB (Page ${page})`);
+    console.log(`✅ [DEV] Retrieved ${orders.length} orders from MongoDB (Page ${page})`);
   } catch (error) {
-    console.error("❌ Error in /orders route:", error.message);
-    res.status(500).json({ success: false, error: error.message });
+    console.error("❌ [DEV] Error in /dev/orders route:", error.message);
+    res.status(500).json({ success: false, error: error.message, instance: 'dev' });
   }
 });
 
 
-// Push status to ClickPost - Production Ready
-router.post('/status/update', async (req, res) => {
-  console.log("\n\n--- Received request for /integrations/clickpost/status/update ---");
+// Push status to ClickPost - Development Instance
+router.post('/dev/status/update', async (req, res) => {
+  console.log("\n\n--- Received request for /integrations/clickpost-dev/dev/status/update ---");
   try {
     // Enhanced token validation
     const tokenValidation = validateToken(req, res);
@@ -267,7 +271,7 @@ router.post('/status/update', async (req, res) => {
     // Validate status_code format
     const validStatusCodes = ['OFD', 'DEL', 'RTO', 'POD', 'NDR', 'OOD', 'PPD', 'DEX', 'INT', 'EXP'];
     if (!validStatusCodes.includes(status_code.toUpperCase())) {
-      console.warn(`⚠️ Unusual status code received: ${status_code}`);
+      console.warn(`⚠️ [DEV] Unusual status code received: ${status_code}`);
     }
 
     // ClickPost API payload (Based on Official Documentation)
@@ -282,7 +286,7 @@ router.post('/status/update', async (req, res) => {
       },
     };
 
-    console.log("[STEP 1] 📋 Sending status update payload to ClickPost:", JSON.stringify(payload, null, 2));
+    console.log("[STEP 1] 📋 [DEV] Sending status update payload to ClickPost:", JSON.stringify(payload, null, 2));
 
     // Enhanced error handling for API call (Using ClickPost's recommended format)
     let response;
@@ -297,12 +301,12 @@ router.post('/status/update', async (req, res) => {
         timeout: 10000, // 10 second timeout
       });
     } catch (apiError) {
-      console.error("❌ ClickPost API Error:", apiError.response?.data || apiError.message);
+      console.error("❌ [DEV] ClickPost API Error:", apiError.response?.data || apiError.message);
       throw new Error(`ClickPost API call failed: ${apiError.response?.data?.message || apiError.message}`);
     }
 
     // Update status in MongoDB with enhanced error handling
-    const collection = db.collection('clickpost_orders');
+    const collection = db.collection('clickpost_dev_orders');
     const updateResult = await collection.updateOne(
       { waybill: waybill.trim() },
       {
@@ -331,18 +335,19 @@ router.post('/status/update', async (req, res) => {
     );
 
     if (updateResult.matchedCount === 0) {
-      console.warn(`⚠️ No order found with waybill ${waybill} in MongoDB`);
+      console.warn(`⚠️ [DEV] No order found with waybill ${waybill} in MongoDB`);
       return res.status(404).json({
         success: false,
         error: `Order with waybill ${waybill} not found`,
-        waybill: waybill
+        waybill: waybill,
+        instance: 'dev'
       });
     }
 
     // Enhanced response
     res.status(200).json({
       success: true,
-      message: `Status updated for waybill ${waybill}`,
+      message: `Status updated for waybill ${waybill} (DEV INSTANCE)`,
       data: {
         waybill: waybill,
         status: status_code.toUpperCase(),
@@ -351,27 +356,29 @@ router.post('/status/update', async (req, res) => {
         timestamp: new Date().toISOString()
       },
       clickpost_response: response.data,
-      database_updated: updateResult.modifiedCount > 0
+      database_updated: updateResult.modifiedCount > 0,
+      instance: 'dev'
     });
     
-    console.log(`✅ Status updated for waybill ${waybill}: ${status_code.toUpperCase()}`);
+    console.log(`✅ [DEV] Status updated for waybill ${waybill}: ${status_code.toUpperCase()}`);
   } catch (error) {
     const errorData = error.response ? error.response.data : error.message;
-    console.error("❌ Status push error:", JSON.stringify(errorData, null, 2));
+    console.error("❌ [DEV] Status push error:", JSON.stringify(errorData, null, 2));
     
     // Enhanced error response
     res.status(500).json({
       success: false,
       error: errorData,
-      message: 'Failed to push status to ClickPost',
-      timestamp: new Date().toISOString()
+      message: 'Failed to push status to ClickPost (DEV INSTANCE)',
+      timestamp: new Date().toISOString(),
+      instance: 'dev'
     });
   }
 });
 
-// Create order in ClickPost (Based on Official Documentation)
-router.post('/create-order', async (req, res) => {
-  console.log("\n\n--- Received request for /integrations/clickpost/create-order ---");
+// Create order in ClickPost - Development Instance
+router.post('/dev/create-order', async (req, res) => {
+  console.log("\n\n--- Received request for /integrations/clickpost-dev/dev/create-order ---");
   try {
     const orderData = req.body;
     
@@ -418,7 +425,7 @@ router.post('/create-order', async (req, res) => {
       }
     };
 
-    console.log("[STEP 1] 📋 Creating order in ClickPost:", JSON.stringify(clickpostPayload, null, 2));
+    console.log("[STEP 1] 📋 [DEV] Creating order in ClickPost:", JSON.stringify(clickpostPayload, null, 2));
 
     // ClickPost API call for order creation
     const createOrderUrl = `${CLICKPOST_BASE_URL}/create-order/?username=${CLICKPOST_USERNAME}&key=${CLICKPOST_API_KEY}`;
@@ -431,7 +438,7 @@ router.post('/create-order', async (req, res) => {
     });
 
     // Save order to database
-    const collection = db.collection('clickpost_orders');
+    const collection = db.collection('clickpost_dev_orders');
     const orderToSave = {
       reference_number: orderData.reference_number,
       waybill: response.data.result?.waybill || 'PENDING',
@@ -440,46 +447,49 @@ router.post('/create-order', async (req, res) => {
         status: 'Created',
         timestamp: new Date(),
         source: 'clickpost_api',
-        description: 'Order created in ClickPost'
+        description: 'Order created in ClickPost (DEV INSTANCE)'
       }],
       pickup_info: clickpostPayload.pickup_info,
       drop_info: clickpostPayload.drop_info,
       shipment_details: clickpostPayload.shipment_details,
       clickpost_response: response.data,
       created_at: new Date(),
-      updated_at: new Date()
+      updated_at: new Date(),
+      instance: 'dev'
     };
 
     await collection.insertOne(orderToSave);
 
     res.status(200).json({
       success: true,
-      message: 'Order created successfully in ClickPost',
+      message: 'Order created successfully in ClickPost (DEV INSTANCE)',
       data: {
         reference_number: orderData.reference_number,
         waybill: response.data.result?.waybill || 'PENDING',
         status: 'Created',
-        clickpost_response: response.data
+        clickpost_response: response.data,
+        instance: 'dev'
       }
     });
 
-    console.log(`✅ Order created in ClickPost: ${orderData.reference_number}, Waybill: ${response.data.result?.waybill || 'PENDING'}`);
+    console.log(`✅ [DEV] Order created in ClickPost: ${orderData.reference_number}, Waybill: ${response.data.result?.waybill || 'PENDING'}`);
   } catch (error) {
-    console.error("❌ ClickPost order creation error:", error.response?.data || error.message);
+    console.error("❌ [DEV] ClickPost order creation error:", error.response?.data || error.message);
     res.status(500).json({
       success: false,
       error: error.response?.data || error.message,
-      message: 'Failed to create order in ClickPost'
+      message: 'Failed to create order in ClickPost (DEV INSTANCE)',
+      instance: 'dev'
     });
   }
 });
 
-// Get specific order by waybill or order_id
-router.get('/order/:identifier', async (req, res) => {
-  console.log("\n\n--- Received request for /integrations/clickpost/order/:identifier ---");
+// Get specific order by waybill or order_id - Development Instance
+router.get('/dev/order/:identifier', async (req, res) => {
+  console.log("\n\n--- Received request for /integrations/clickpost-dev/dev/order/:identifier ---");
   try {
     const { identifier } = req.params;
-    const collection = db.collection('clickpost_orders');
+    const collection = db.collection('clickpost_dev_orders');
     
     // Search by waybill or order_id
     const order = await collection.findOne({
@@ -493,37 +503,40 @@ router.get('/order/:identifier', async (req, res) => {
       return res.status(404).json({
         success: false,
         error: 'Order not found',
-        identifier: identifier
+        identifier: identifier,
+        instance: 'dev'
       });
     }
     
     res.status(200).json({
       success: true,
-      data: order
+      data: order,
+      instance: 'dev'
     });
     
-    console.log(`✅ Retrieved order: ${identifier}`);
+    console.log(`✅ [DEV] Retrieved order: ${identifier}`);
   } catch (error) {
-    console.error("❌ Error in /order/:identifier route:", error.message);
-    res.status(500).json({ success: false, error: error.message });
+    console.error("❌ [DEV] Error in /dev/order/:identifier route:", error.message);
+    res.status(500).json({ success: false, error: error.message, instance: 'dev' });
   }
 });
 
-// Health check endpoint
-router.get('/health', (req, res) => {
+// Health check endpoint - Development Instance
+router.get('/dev/health', (req, res) => {
   res.status(200).json({
     success: true,
-    message: 'ClickPost integration is healthy',
+    message: 'ClickPost integration is healthy (DEV INSTANCE)',
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    version: '1.0.0-dev',
+    instance: 'dev'
   });
 });
 
-// Get order statistics
-router.get('/stats', async (req, res) => {
-  console.log("\n\n--- Received request for /integrations/clickpost/stats ---");
+// Get order statistics - Development Instance
+router.get('/dev/stats', async (req, res) => {
+  console.log("\n\n--- Received request for /integrations/clickpost-dev/dev/stats ---");
   try {
-    const collection = db.collection('clickpost_orders');
+    const collection = db.collection('clickpost_dev_orders');
     
     const stats = await collection.aggregate([
       {
@@ -546,13 +559,14 @@ router.get('/stats', async (req, res) => {
         today_orders: todayOrders,
         status_breakdown: stats,
         generated_at: new Date().toISOString()
-      }
+      },
+      instance: 'dev'
     });
     
-    console.log(`✅ Retrieved stats: ${totalOrders} total orders`);
+    console.log(`✅ [DEV] Retrieved stats: ${totalOrders} total orders`);
   } catch (error) {
-    console.error("❌ Error in /stats route:", error.message);
-    res.status(500).json({ success: false, error: error.message });
+    console.error("❌ [DEV] Error in /dev/stats route:", error.message);
+    res.status(500).json({ success: false, error: error.message, instance: 'dev' });
   }
 });
 
@@ -569,23 +583,23 @@ module.exports = {
 /*
 
 ========================================
-CLICKPOST INTEGRATION - PRODUCTION ROUTES
+CLICKPOST INTEGRATION - DEVELOPMENT ROUTES
 ========================================
 
-BASE URL: https://your-domain.com/integrations/clickpost
-LOCAL URL: http://localhost:3007/integrations/clickpost
+BASE URL: https://your-domain.com/integrations/clickpost-dev
+LOCAL URL: http://localhost:3007/integrations/clickpost-dev
 
 1. WEBHOOK ENDPOINTS (For ClickPost to send data to your system):
    =============================================================
    
    📥 RECEIVE ORDERS WEBHOOK:
-   POST https://your-domain.com/integrations/clickpost/webhook/orders
+   POST https://your-domain.com/integrations/clickpost-dev/dev/webhook/orders
    Headers: 
      - x-api-key: your_clickpost_webhook_token
      - Content-Type: application/json
    
    📥 STATUS UPDATE WEBHOOK:
-   POST https://your-domain.com/integrations/clickpost/status/update
+   POST https://your-domain.com/integrations/clickpost-dev/dev/status/update
    Headers:
      - x-api-key: your_clickpost_webhook_token
      - Content-Type: application/json
@@ -594,7 +608,7 @@ LOCAL URL: http://localhost:3007/integrations/clickpost
    ===========================================================
    
    📤 CREATE ORDER:
-   POST https://your-domain.com/integrations/clickpost/create-order
+   POST https://your-domain.com/integrations/clickpost-dev/dev/create-order
    Body: {
      "reference_number": "ORDER123",
      "pickup_info": { "name": "...", "phone": "...", "address": "..." },
@@ -603,29 +617,29 @@ LOCAL URL: http://localhost:3007/integrations/clickpost
    }
    
    📊 GET ORDERS:
-   GET https://your-domain.com/integrations/clickpost/orders
+   GET https://your-domain.com/integrations/clickpost-dev/dev/orders
    Query Params: ?page=1&limit=10&status=Pending&waybill=CPAWB123
    
    🔍 GET SPECIFIC ORDER:
-   GET https://your-domain.com/integrations/clickpost/order/:identifier
-   Example: GET /order/CPAWB123456 or GET /order/ORDER123
+   GET https://your-domain.com/integrations/clickpost-dev/dev/order/:identifier
+   Example: GET /dev/order/CPAWB123456 or GET /dev/order/ORDER123
    
    📈 GET STATISTICS:
-   GET https://your-domain.com/integrations/clickpost/stats
+   GET https://your-domain.com/integrations/clickpost-dev/dev/stats
    
    ❤️ HEALTH CHECK:
-   GET https://your-domain.com/integrations/clickpost/health
+   GET https://your-domain.com/integrations/clickpost-dev/dev/health
 
-3. PRODUCTION WEBHOOK CONFIGURATION:
-   ==================================
+3. DEVELOPMENT WEBHOOK CONFIGURATION:
+   ===================================
    
-   In ClickPost Dashboard, configure these webhooks:
+   In ClickPost Dashboard, configure these webhooks for development:
    
    📥 ORDER WEBHOOK URL:
-   https://your-domain.com/integrations/clickpost/webhook/orders
+   https://your-domain.com/integrations/clickpost-dev/dev/webhook/orders
    
    📥 STATUS UPDATE URL:
-   https://your-domain.com/integrations/clickpost/status/update
+   https://your-domain.com/integrations/clickpost-dev/dev/status/update
    
    🔐 AUTHENTICATION:
    - Use your CLICKPOST_WEBHOOK_TOKEN as x-api-key header
@@ -680,12 +694,13 @@ LOCAL URL: http://localhost:3007/integrations/clickpost
    ✅ SUCCESS RESPONSE:
    {
      "success": true,
-     "message": "Order created successfully",
+     "message": "Order created successfully (DEV INSTANCE)",
      "data": {
        "order_id": "ORDER123456",
        "waybill": "CPAWB123456789",
        "status": "Pending",
-       "created_at": "2024-01-15T10:30:00Z"
+       "created_at": "2024-01-15T10:30:00Z",
+       "instance": "dev"
      }
    }
    
@@ -694,7 +709,8 @@ LOCAL URL: http://localhost:3007/integrations/clickpost
      "success": false,
      "error": "Missing required fields",
      "missing_fields": ["order_id", "pickup_info"],
-     "timestamp": "2024-01-15T10:30:00Z"
+     "timestamp": "2024-01-15T10:30:00Z",
+     "instance": "dev"
    }
 
 6. STATUS CODES REFERENCE:
@@ -711,8 +727,8 @@ LOCAL URL: http://localhost:3007/integrations/clickpost
    - INT: In Transit
    - EXP: Exception
 
-7. PRODUCTION CHECKLIST:
-   =====================
+7. DEVELOPMENT CHECKLIST:
+   ======================
    
    ✅ Environment Variables Set:
    - CLICKPOST_USERNAME
@@ -731,6 +747,17 @@ LOCAL URL: http://localhost:3007/integrations/clickpost
    - Health check endpoint
    - Logging enabled
    - Database connection monitoring
+   - Separate dev database collection
+
+8. DEVELOPMENT FEATURES:
+   =====================
+   
+   🔧 DEV-SPECIFIC FEATURES:
+   - Uses 'clickpost_dev_orders' collection
+   - All responses include 'instance: dev'
+   - Console logs prefixed with [DEV]
+   - Separate tracking URLs for dev environment
+   - Enhanced logging for development debugging
 
 ========================================
 */
